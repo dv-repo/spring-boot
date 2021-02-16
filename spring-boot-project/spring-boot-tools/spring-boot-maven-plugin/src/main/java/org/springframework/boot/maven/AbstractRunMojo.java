@@ -21,6 +21,9 @@ import java.io.IOException;
 import java.lang.reflect.Method;
 import java.net.MalformedURLException;
 import java.net.URL;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Collections;
@@ -45,6 +48,7 @@ import org.apache.maven.toolchain.ToolchainManager;
 import org.springframework.boot.loader.tools.FileUtils;
 import org.springframework.boot.loader.tools.JavaExecutable;
 import org.springframework.boot.loader.tools.MainClassFinder;
+import org.springframework.util.StringUtils;
 
 /**
  * Base class to run a spring application.
@@ -223,6 +227,19 @@ public abstract class AbstractRunMojo extends AbstractDependencyFilterMojo {
 	 */
 	@Parameter(property = "spring-boot.run.skip", defaultValue = "false")
 	private boolean skip;
+
+	/**
+	 * Repeated paths in classpath string that should be replaced with a shorter soft
+	 * link.
+	 * @since 1.0
+	 */
+	@Parameter
+	private List<DependencyPath> dependencyPaths;
+
+	/**
+	 * Classpath with repeated paths replaced with soft link.
+	 */
+	private String windowsClassPath;
 
 	@Override
 	public void execute() throws MojoExecutionException, MojoFailureException {
@@ -419,11 +436,22 @@ public abstract class AbstractRunMojo extends AbstractDependencyFilterMojo {
 				}
 				classpath.append(new File(ele.toURI()));
 			}
-			if (getLog().isDebugEnabled()) {
-				getLog().debug("Classpath for forked process: " + classpath);
+			this.windowsClassPath = classpath.toString();
+			if (this.dependencyPaths != null) {
+				for (DependencyPath path : this.dependencyPaths) {
+					this.windowsClassPath = StringUtils.replace(this.windowsClassPath, path.getOldPath(),
+							path.getNewPath());
+					Path link = Paths.get(path.getNewPath());
+					if (!Files.exists(link)) {
+						Runtime.getRuntime().exec("cmd /c mklink /J " + path.getNewPath() + " " + path.getOldPath());
+					}
+				}
 			}
 			args.add("-cp");
-			args.add(classpath.toString());
+			args.add(this.windowsClassPath);
+			if (getLog().isDebugEnabled()) {
+				getLog().debug("Classpath for forked process: " + this.windowsClassPath);
+			}
 		}
 		catch (Exception ex) {
 			throw new MojoExecutionException("Could not build classpath", ex);
